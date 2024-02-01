@@ -10,6 +10,7 @@ import json
 import csv
 import logging
 import datetime
+import time
 import argparse
 import collections
 import subprocess
@@ -398,6 +399,58 @@ def create():
             if config['paged_content_from_directories'] is True:
                 # Console output and logging are done in the create_children_from_directory() function.
                 create_children_from_directory(config, row_as_parent, node_id)
+
+
+    if config['nodes_only'] is False and 'verify_media_created_csv_path' in config and len(config['verify_media_created_csv_path']) > 0:
+        print("\nStarting media verification.")
+
+        path_to_rollback_csv_file = get_rollback_csv_filepath(config)
+        with open(path_to_rollback_csv_file) as rollback_csv_file:
+            nids_to_check_media_of = rollback_csv_file.read().splitlines()
+
+        # report_field_names = ['Node ID', 'Title', 'Islandora model', 'Media']
+        report_field_names = ['Node ID', 'Media']
+        csv_file = open(config['verify_media_created_csv_path'], 'a+', encoding='utf-8')
+        writer = csv.DictWriter(csv_file, fieldnames=report_field_names, lineterminator="\n")
+        writer.writeheader()
+
+        place_counter = 0
+        for nid_to_check_media_of in nids_to_check_media_of:
+            if nid_to_check_media_of == 'node_id':
+                continue
+
+            place_counter = place_counter + 1
+            print("DEBUG place counter", place_counter)
+
+            # Because derivative media are created asynchonously, we need to provide some
+            # time for them to be created before we check for their existence. Media attached
+            # to nodes created early in the task will likely exist by the time Workbench
+            # checks to see if they exist, but media attached to nodes created late in the
+            # task might not exist by the time they are checked. In order to avoid sleep()ing
+            # prematurely, we only apply this algorithm to the last 10% of nodes (or to all
+            # nodes if there are fewer than 10  created in the task.)
+            where_to_start_sleeping = round(len(nids_to_check_media_of) / 10)
+            print("DEBUG where to start sleeping", round(where_to_start_sleeping))
+
+            if len(nids_to_check_media_of) < 10:
+                time.sleep(2)
+            if place_counter > where_to_start_sleeping:
+                time.sleep(2)
+
+            print(f"Verifying media for node {nid_to_check_media_of}.")
+
+            # check the node's media and write out a row with the node ID, title, and output of get_node_media_summary(config, nid)
+
+            row = dict()
+            row['Node ID'] = nid_to_check_media_of
+            # row['Title'] = node['title'][0]['value']
+            # row['Islandora model'] = get_term_name(config, node['field_model'][0]['target_id'])
+            row['Media'] = get_node_media_summary(config, nid_to_check_media_of)
+
+            writer.writerow(row)
+
+        csv_file.close()
+
 
 
 def update():
